@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Lanthra",
+  "version": "0.1.0",
+  "description": "AI inline text editing — stay in the page, never leave the flow.",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "dist/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "toggle-edit-mode": {
+      "suggested_key": {
+        "default": "Alt+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Toggle Lanthra edit mode"
+    }
+  },
+  "action": {
+    "default_title": "Lanthra",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/page-bridge.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

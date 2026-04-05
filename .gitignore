@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.js.map
+native-host/LanthraHost/.build/
+native-host/LanthraHost/LanthraHost
+native-host/LanthraHost/*.xcodeproj/
+.DS_Store

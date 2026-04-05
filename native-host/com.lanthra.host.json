@@ -1,0 +1,9 @@
+{
+  "name": "com.lanthra.host",
+  "description": "Lanthra native messaging host — Groq streaming bridge",
+  "path": "PLACEHOLDER_REPLACE_WITH_ABSOLUTE_PATH_TO_LanthraHost_BINARY",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://PLACEHOLDER_REPLACE_WITH_EXTENSION_ID/"
+  ]
+}

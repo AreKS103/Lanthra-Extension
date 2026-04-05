@@ -1,0 +1,16 @@
+{
+  "name": "lanthra-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "build:prod": "NODE_ENV=production node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}
