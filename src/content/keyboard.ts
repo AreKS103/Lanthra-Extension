@@ -27,11 +27,11 @@ function onKeyDown(e: KeyboardEvent): void {
   // Ignore events fired inside our own host elements
   if ((e.target as Element)?.hasAttribute?.('data-lanthra-host')) return;
 
-  // Cmd+Shift+L (mac) or Alt+Shift+L (other) — matches manifest command
-  const isMac = navigator.platform.startsWith('Mac') || navigator.platform === 'iPhone';
+  // Cmd+Shift+X (mac) or Ctrl+Shift+X (other) — matches manifest command
+  const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
   const isToggle = isMac
-    ? e.metaKey && e.shiftKey && e.key.toLowerCase() === 'l'
-    : e.altKey  && e.shiftKey && e.key.toLowerCase() === 'l';
+    ? e.metaKey && e.shiftKey && e.key.toLowerCase() === 'x'
+    : e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'x';
 
   if (isToggle) {
     e.preventDefault();

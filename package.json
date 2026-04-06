@@ -10,7 +10,16 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
+    "@types/turndown": "^5.0.6",
     "esbuild": "^0.21.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.50",
+    "@mozilla/readability": "^0.6.0",
+    "ai": "^6.0.146",
+    "marked": "^17.0.6",
+    "turndown": "^7.2.4",
+    "zod": "^4.3.6"
   }
 }

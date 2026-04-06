@@ -38,6 +38,14 @@ const entries = [
     format:      'iife',
     platform:    'browser',
   },
+  // Side panel script
+  {
+    ...shared,
+    entryPoints: ['src/sidepanel/sidepanel.ts'],
+    outfile:     'dist/sidepanel.js',
+    format:      'iife',
+    platform:    'browser',
+  },
 ];
 
 if (isWatch) {

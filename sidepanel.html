@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lanthra</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="panel">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <span class="brand-name">Lanthra</span>
+        <span id="status-badge" class="badge badge-idle">Idle</span>
+        <span id="page-status" class="badge badge-checking" title="Checking page compatibility…">…</span>
+      </div>
+      <div class="header-right">
+        <button id="btn-settings-toggle" class="icon-btn" title="Settings">
+          <!-- Gear icon from Heroicons (MIT) -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+        <button id="btn-close" class="icon-btn" title="Close panel (Ctrl+.)">
+          <!-- X icon -->
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Toggle button — pinned below header, not scrollable -->
+    <div class="toolbar">
+      <div id="tab-context" class="tab-context" title="Active tab">
+        <svg class="tab-context-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+        <span id="tab-context-text">No page</span>
+      </div>
+      <button id="btn-toggle" class="btn btn-toggle">
+        <span id="toggle-text">Activate Edit Mode</span>
+      </button>
+    </div>
+
+    <!-- Main content area -->
+    <div class="content">
+      <!-- Hint -->
+      <div id="hint-block" class="hint">
+        <p>Click <strong>Activate Edit Mode</strong> or press <kbd id="shortcut-display">Ctrl+Shift+X</kbd>, then click any text on the page to edit it inline with AI.</p>
+      </div>
+
+      <!-- Chat messages -->
+      <div id="chat-messages" class="chat-messages"></div>
+
+      <!-- Scroll to bottom -->
+      <button id="btn-scroll-bottom" class="scroll-to-bottom" title="Scroll to bottom">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Bottom input area -->
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="chat-input" placeholder="Ask Lanthra anything…" rows="1" disabled></textarea>
+        <button id="btn-send" class="icon-btn send-btn" disabled title="Send (Enter)">
+          <svg id="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          <svg id="stop-icon" class="hidden" width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings lightbox modal (outside panel flow) -->
+  <div id="settings-overlay" class="modal-overlay hidden">
+    <div class="modal-backdrop"></div>
+    <div id="settings-panel" class="settings modal-panel">
+      <div class="modal-header">
+        <div class="modal-tabs">
+          <button class="modal-tab active" data-tab="settings">Settings</button>
+          <button class="modal-tab" data-tab="usage">Usage</button>
+        </div>
+        <button id="btn-settings-close" class="icon-btn" title="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <!-- Settings tab content -->
+      <div id="tab-settings" class="tab-content">
+      <div class="settings-section">
+        <span class="settings-label">Provider</span>
+        <div class="custom-select" id="provider-select-wrap">
+          <button class="custom-select-trigger" id="provider-trigger" type="button">
+            <span class="custom-select-value">Select provider</span>
+            <svg class="custom-select-arrow" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg>
+          </button>
+          <div class="custom-select-dropdown" id="provider-dropdown"></div>
+        </div>
+      </div>
+      <div class="settings-section" id="model-section">
+        <span class="settings-label">Model</span>
+        <div class="custom-select" id="model-select-wrap">
+          <button class="custom-select-trigger" id="model-trigger" type="button">
+            <span class="custom-select-value">Loading models…</span>
+            <svg class="custom-select-arrow" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg>
+          </button>
+          <div class="custom-select-dropdown" id="model-dropdown"></div>
+        </div>
+        <span id="model-loading" class="loading-text hidden">Loading models…</span>
+      </div>
+      <div class="settings-section" id="api-key-section">
+        <span class="settings-label">API Key</span>
+        <div class="key-row">
+          <input id="api-key" type="password" placeholder="sk-or-… / sk-ant-… / sk-…" autocomplete="off">
+          <button id="btn-save-key" class="btn btn-sm">Save</button>
+        </div>
+        <p id="key-status" class="key-status"></p>
+      </div>
+      <div class="settings-section" id="ollama-section" style="display:none">
+        <span class="settings-label">Endpoint URL</span>
+        <div class="key-row">
+          <input id="ollama-url" type="text" placeholder="http://localhost:11434" autocomplete="off">
+          <button id="btn-test-ollama" class="btn btn-sm">Test</button>
+        </div>
+        <p id="ollama-status" class="key-status"></p>
+      </div>
+      <div class="settings-section">
+        <button id="btn-clear-chat" class="btn-danger">Clear Conversation</button>
+      </div>
+      </div>
+      <!-- Usage tab content -->
+      <div id="tab-usage" class="tab-content hidden">
+        <div class="usage-summary">
+          <div class="usage-stat">
+            <span class="usage-stat-label">Total Requests</span>
+            <span id="usage-total-requests" class="usage-stat-value">0</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-label">Prompt Tokens</span>
+            <span id="usage-prompt-tokens" class="usage-stat-value">0</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-label">Completion Tokens</span>
+            <span id="usage-completion-tokens" class="usage-stat-value">0</span>
+          </div>
+          <div class="usage-stat">
+            <span class="usage-stat-label">Total Tokens</span>
+            <span id="usage-total-tokens" class="usage-stat-value">0</span>
+          </div>
+        </div>
+        <div id="usage-by-model" class="usage-models"></div>
+        <button id="btn-reset-usage" class="btn-danger" style="margin-top:8px">Reset Usage Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear chat confirmation modal -->
+  <div id="clear-confirm-overlay" class="modal-overlay hidden">
+    <div class="modal-backdrop"></div>
+    <div class="clear-confirm-panel modal-panel">
+      <p class="clear-confirm-text">Clear all messages in this conversation?</p>
+      <div class="clear-confirm-actions">
+        <button id="btn-clear-cancel" class="btn btn-sm">Cancel</button>
+        <button id="btn-clear-confirm" class="btn-danger btn-sm-danger">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="dist/sidepanel.js"></script>
+</body>
+</html>

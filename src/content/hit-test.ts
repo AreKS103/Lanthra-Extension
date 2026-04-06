@@ -14,10 +14,10 @@ export interface HitTestResult {
   isTextHit: boolean;
 }
 
-/** Elements we never want to insert into. */
+/** Elements we never want to insert into (replaced/void elements). */
 const BLOCKED_TAGS = new Set([
   'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE',
-  'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON',
+  'INPUT', 'TEXTAREA', 'SELECT',
   'VIDEO', 'AUDIO', 'CANVAS', 'SVG', 'MATH',
   'IFRAME', 'FRAME', 'EMBED', 'OBJECT',
 ]);
@@ -66,13 +66,14 @@ function isLanthraElement(el: Element): boolean {
   );
 }
 
-/** True if the element or any ancestor is a page-owned contenteditable zone. */
+/** True if the element or any ancestor is a page-owned editable zone (not just ce=false). */
 function isPageEditable(el: Element): boolean {
   let current: Element | null = el;
   while (current) {
     const ce = current.getAttribute('contenteditable');
-    // 'false' means explicitly non-editable — that is fine to target
-    if (ce !== null && ce !== 'false') return true;
+    // 'false' = explicitly non-editable → fine to target
+    // 'true', '', 'plaintext-only' = editable → skip
+    if (ce !== null && ce !== 'false' && ce !== 'inherit') return true;
     current = current.parentElement;
   }
   return false;
