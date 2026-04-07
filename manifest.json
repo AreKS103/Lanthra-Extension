@@ -3,6 +3,9 @@
   "name": "Lanthra",
   "version": "0.1.0",
   "description": "AI inline text editing — stay in the page, never leave the flow.",
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src https: http://localhost:*"
+  },
   "permissions": [
     "activeTab",
     "tabs",
@@ -49,11 +52,5 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["dist/page-bridge.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

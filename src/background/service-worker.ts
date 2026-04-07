@@ -17,14 +17,31 @@ attachMessageRouter();
 
 async function prewarmConnection(): Promise<void> {
   try {
-    const stored = await chrome.storage.local.get(['lanthra_provider', 'lanthra_api_key']);
+    const stored = await chrome.storage.local.get(['lanthra_provider']);
     const provider = stored.lanthra_provider ?? 'openrouter';
     if (provider === 'ollama') {
-      // Warm Ollama instead
       const ollamaUrl = (await chrome.storage.local.get(['lanthra_ollama_url'])).lanthra_ollama_url || 'http://localhost:11434';
-      fetch(`${ollamaUrl.replace(/\/+$/, '')}/api/tags`, { method: 'GET' }).catch(() => {});
-    } else if (stored.lanthra_api_key) {
-      fetch('https://openrouter.ai/api/v1/models', { method: 'HEAD' }).catch(() => {});
+      try {
+        const parsed = new URL(ollamaUrl);
+        if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+          fetch(`${ollamaUrl.replace(/\/+$/, '')}/api/tags`, { method: 'GET' }).catch(() => {});
+        }
+      } catch { /* invalid URL */ }
+    } else {
+      // Warm the relevant API endpoint (best-effort HEAD)
+      const WARM_URLS: Record<string, string> = {
+        'groq':       'https://api.groq.com/openai/v1/models',
+        'openai':     'https://api.openai.com/v1/models',
+        'anthropic':  'https://api.anthropic.com/v1/models',
+        'google':     'https://generativelanguage.googleapis.com/v1beta/models',
+        'deepseek':   'https://api.deepseek.com/v1/models',
+        'mistralai':  'https://api.mistral.ai/v1/models',
+        'x-ai':       'https://api.x.ai/v1/models',
+        'nvidia':     'https://integrate.api.nvidia.com/v1/models',
+        'perplexity': 'https://api.perplexity.ai/models',
+      };
+      const url = WARM_URLS[provider] ?? 'https://openrouter.ai/api/v1/models';
+      fetch(url, { method: 'HEAD' }).catch(() => {});
     }
   } catch { /* best effort */ }
 }
@@ -91,6 +108,7 @@ function broadcastTabInfo(tab: chrome.tabs.Tab): void {
     url: tab.url,
     title: tab.title ?? '',
     tabId: tab.id ?? 0,
+    favIconUrl: tab.favIconUrl ?? '',
   }).catch(() => { /* panel closed */ });
 }
 
@@ -102,7 +120,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.active) {
+  if (tab.active && (changeInfo.status === 'complete' || changeInfo.favIconUrl)) {
     broadcastTabInfo(tab);
   }
 });

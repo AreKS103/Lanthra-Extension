@@ -137,6 +137,12 @@ body {
   opacity: 0.6;
 }
 
+.tab-favicon {
+  flex-shrink: 0;
+  border-radius: 2px;
+  object-fit: contain;
+}
+
 .tab-context.streaming {
   color: var(--success);
 }
@@ -289,6 +295,16 @@ kbd {
 
 .key-status.saved { color: var(--success); }
 .key-status.error { color: var(--danger); }
+
+.api-key-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 100ms;
+  align-self: flex-start;
+}
+.api-key-link:hover { opacity: 1; text-decoration: underline; }
 
 .loading-text {
   font-size: 11px;

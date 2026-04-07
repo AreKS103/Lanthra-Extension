@@ -10,7 +10,10 @@
 // Turndown in the content script.
 
 import { streamText, tool, type LanguageModel } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI }              from '@ai-sdk/openai';
+import { createGroq }                from '@ai-sdk/groq';
+import { createAnthropic }           from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI }  from '@ai-sdk/google';
 import { z } from 'zod';
 import { log } from '../shared/logger';
 
@@ -76,6 +79,30 @@ function guardCallbacks(raw: StreamCallbacks): StreamCallbacks {
   return guarded;
 }
 
+// ── Provider routing ──────────────────────────────────────────────────────────
+
+const OPENAI_COMPAT_URLS: Record<string, string> = {
+  'openai':     'https://api.openai.com/v1',
+  'deepseek':   'https://api.deepseek.com/v1',
+  'mistralai':  'https://api.mistral.ai/v1',
+  'x-ai':       'https://api.x.ai/v1',
+  'nvidia':     'https://integrate.api.nvidia.com/v1',
+  'perplexity': 'https://api.perplexity.ai',
+};
+
+const OPENROUTER_ONLY = new Set([
+  'meta-llama', 'qwen', 'microsoft', 'amazon', 'nous', 'openrouter',
+]);
+
+function providerKeyName(p: string): string {
+  return OPENROUTER_ONLY.has(p) ? 'lanthra_key_openrouter' : `lanthra_key_${p}`;
+}
+
+/** Strip OpenRouter prefix (e.g. 'anthropic/claude-sonnet-4' → 'claude-sonnet-4') */
+function nativeModelId(model: string): string {
+  return model.includes('/') ? model.split('/').slice(1).join('/') : model;
+}
+
 // ── Provider model factory ────────────────────────────────────────────────────
 
 function buildModel(
@@ -85,6 +112,15 @@ function buildModel(
   ollamaUrl: string,
 ): LanguageModel {
   if (provider === 'ollama') {
+    // Validate Ollama URL is localhost to prevent SSRF
+    try {
+      const parsed = new URL(ollamaUrl);
+      if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+        throw new Error('Ollama URL must point to localhost');
+      }
+    } catch (e) {
+      throw new Error(e instanceof Error ? e.message : 'Invalid Ollama URL');
+    }
     const ollama = createOpenAI({
       baseURL: `${ollamaUrl.replace(/\/+$/, '')}/v1`,
       apiKey: 'ollama',
@@ -92,7 +128,25 @@ function buildModel(
     return ollama(model);
   }
 
-  // OpenRouter — default for all cloud providers (including Anthropic)
+  if (provider === 'groq') {
+    return createGroq({ apiKey })(model);
+  }
+
+  if (provider === 'anthropic') {
+    return createAnthropic({ apiKey })(nativeModelId(model));
+  }
+
+  if (provider === 'google') {
+    return createGoogleGenerativeAI({ apiKey })(nativeModelId(model));
+  }
+
+  // Direct OpenAI-compatible providers
+  const compatUrl = OPENAI_COMPAT_URLS[provider];
+  if (compatUrl) {
+    return createOpenAI({ baseURL: compatUrl, apiKey })(nativeModelId(model));
+  }
+
+  // OpenRouter — default for all other cloud providers
   const openrouter = createOpenAI({
     baseURL: 'https://openrouter.ai/api/v1',
     apiKey,
@@ -139,9 +193,25 @@ function buildSystemPrompt(context: string, hasTools: boolean): string {
     const header      = lines.slice(0, 2).join('\n');
     const editingLine = lines[2] ?? '';
     return (
-      'You are Lanthra, an inline AI assistant embedded in a webpage. ' +
-      'Your response will appear inline within the page text, so keep it concise unless the user explicitly asks for more. ' +
-      'Never use em dashes.\n' +
+      'You are Lanthra, an inline AI assistant. You are in inline edit mode.\n' +
+      'The user is editing text that already exists on the page.\n\n' +
+      'Rules:\n' +
+      '- If context contains Selected Text, Target Text, or Editing near, treat that text as the source text to operate on.\n' +
+      '- If the user says "translate this", "rewrite this", "fix this", "make this shorter", "improve this", or similar, apply the request directly to the source text.\n' +
+      '- Do not explain.\n' +
+      '- Do not analyze.\n' +
+      '- Do not offer multiple options unless the user explicitly asks for options.\n' +
+      '- Do not say "please provide the text" if source text is already present in context.\n' +
+      '- Output only the final transformed text.\n' +
+      '- Preserve emojis, line breaks, and casual tone unless the user asks otherwise.\n' +
+      '- If no usable source text exists at all, ask one short clarification.\n' +
+      '- Never use em dashes.\n\n' +
+      'Example behavior:\n' +
+      'User: translate this to French\n' +
+      'Context: Editing near: "I can\'t believe this happened 😂"\n' +
+      'Output: "Je n\'arrive pas à croire que c\'est arrivé 😂"\n\n' +
+      'Inline edit mode has higher priority than general chat mode.\n' +
+      'When inline edit mode is active, perform the requested transformation on the detected source text and return only the result.\n\n' +
       `Page: ${header}\n${editingLine}\n` +
       toolHint +
       ADAPTIVE_BLOCK
@@ -245,7 +315,10 @@ async function doStream(
     try {
       const imgResp = await fetch(imageUrl, { signal: ctrl.signal });
       if (!imgResp.ok) throw new Error(`HTTP ${imgResp.status}`);
+      const contentLen = parseInt(imgResp.headers.get('content-length') || '0', 10);
+      if (contentLen > 10 * 1024 * 1024) throw new Error('Image too large (>10 MB)');
       const buf  = await imgResp.arrayBuffer();
+      if (buf.byteLength > 10 * 1024 * 1024) throw new Error('Image too large (>10 MB)');
       const b64  = arrayBufferToBase64(buf);
       const mime = imgResp.headers.get('content-type') || 'image/png';
       userContent = [
@@ -369,16 +442,22 @@ export async function startStream(
   const stored = await chrome.storage.local.get([
     'lanthra_provider',
     'lanthra_model',
-    'lanthra_api_key',
     'lanthra_ollama_url',
   ]);
 
-  const provider:  string = stored.lanthra_provider  ?? 'openrouter';
-  const model:     string = stored.lanthra_model     ?? 'anthropic/claude-3.5-haiku';
-  const apiKey:    string = stored.lanthra_api_key   ?? '';
+  const provider:  string = stored.lanthra_provider   ?? 'openrouter';
+  const model:     string = stored.lanthra_model      ?? 'anthropic/claude-3.5-haiku';
   const ollamaUrl: string = stored.lanthra_ollama_url ?? 'http://localhost:11434';
 
-  log('info', `ai-client: provider=${provider}, model=${model}, hasKey=${!!apiKey}`);
+  // Read the provider-specific API key
+  let apiKey = '';
+  if (provider !== 'ollama') {
+    const keyName = providerKeyName(provider);
+    const keyData = await chrome.storage.local.get([keyName]);
+    apiKey = (keyData[keyName] as string | undefined) ?? '';
+  }
+
+  log('info', `ai-client: provider=${provider}, model=${model}`);
 
   if (!apiKey && provider !== 'ollama') {
     callbacks.onError(
@@ -476,6 +555,23 @@ export async function startStream(
           throw e;
         }
       }
+    } else if (provider === 'groq') {
+      // Groq: free-tier Llama models have unreliable tool-call round-trips
+      // through multi-step flows. Pre-fetch page content like Ollama.
+      let groqSystem = buildSystemPrompt(context, false);
+      if (toolExecutor && context.startsWith('lanthra:')) {
+        try {
+          const pageContent = await toolExecutor('get_page_content');
+          if (pageContent && pageContent.length > 0) {
+            groqSystem += '\n\n--- Page Content ---\n' + pageContent;
+          }
+        } catch (e) {
+          log('warn', 'ai-client: failed to pre-fetch page content for groq', {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      await doStream(aiModel, groqSystem, prompt, cachingSafe, ctrl, undefined, imageUrl, imageBase64, imageMediaType);
     } else {
       try {
         await doStream(aiModel, system, prompt, cachingSafe, ctrl, tools, imageUrl, imageBase64, imageMediaType);
@@ -493,13 +589,9 @@ export async function startStream(
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.toLowerCase().includes('abort')) return;
 
-    // Helpful Ollama CORS / connection error message
+    // Ollama connection error
     if (provider === 'ollama' && (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS'))) {
-      safe.onError(
-        'Cannot connect to Ollama. Make sure it is running with CORS enabled:\n\n' +
-        '  $env:OLLAMA_ORIGINS="*"; ollama serve\n\n' +
-        'Then try again.'
-      );
+      safe.onError('Cannot detect Ollama. Make sure it is running.');
     } else if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
       safe.onError('Rate limited — wait a minute or switch to a different model.');
     } else {

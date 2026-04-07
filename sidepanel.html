@@ -40,7 +40,8 @@
     <!-- Toggle button — pinned below header, not scrollable -->
     <div class="toolbar">
       <div id="tab-context" class="tab-context" title="Active tab">
-        <svg class="tab-context-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
+        <img id="tab-favicon" class="tab-favicon" width="14" height="14" alt="" style="display:none;" />
+        <svg id="tab-context-icon" class="tab-context-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
           <line x1="2" y1="12" x2="22" y2="12"/>
@@ -138,7 +139,9 @@
           <button id="btn-save-key" class="btn btn-sm">Save</button>
         </div>
         <p id="key-status" class="key-status"></p>
+        <a id="api-key-link" class="api-key-link" href="#" target="_blank" rel="noopener noreferrer">Get API Key →</a>
       </div>
+
       <div class="settings-section" id="ollama-section" style="display:none">
         <span class="settings-label">Endpoint URL</span>
         <div class="key-row">

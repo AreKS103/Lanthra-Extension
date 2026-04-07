@@ -10,14 +10,19 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
+    "@types/dompurify": "^3.0.5",
     "@types/turndown": "^5.0.6",
     "esbuild": "^0.21.0",
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.67",
+    "@ai-sdk/google": "^3.0.59",
+    "@ai-sdk/groq": "^3.0.34",
     "@ai-sdk/openai": "^3.0.50",
     "@mozilla/readability": "^0.6.0",
     "ai": "^6.0.146",
+    "dompurify": "^3.3.3",
     "marked": "^17.0.6",
     "turndown": "^7.2.4",
     "zod": "^4.3.6"

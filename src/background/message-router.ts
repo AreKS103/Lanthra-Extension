@@ -84,8 +84,10 @@ function onContentScriptConnect(port: chrome.runtime.Port): void {
           const imageOnly = !!msg.imageOnly;
           const isPanelPrompt = (msg.context ?? '').startsWith('lanthra:page\n');
 
-          // Always show user message in panel, even for image-only prompts
-          broadcast({ type: 'LANTHRA_CHAT_USER', sessionId, prompt: msg.prompt });
+          // Always show user message in panel, even for image-only prompts.
+          // Use displayPrompt (original user input) when available so injected
+          // context (e.g. "Target text to modify") never leaks into the UI.
+          broadcast({ type: 'LANTHRA_CHAT_USER', sessionId, prompt: msg.displayPrompt ?? msg.prompt });
 
           startStream(sessionId, msg.prompt, msg.context, {
             onToken: (token) => {

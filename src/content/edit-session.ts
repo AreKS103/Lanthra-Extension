@@ -20,7 +20,7 @@ import { saveSelection, restoreSelection, clearSelection } from './selection-sto
 import type { SavedSelection }                         from './selection-store';
 import type { SWMessage }                              from '../types/messages';
 import { PORT_SESSION_PREFIX }                         from '../types/messages';
-import { executePageTool }                             from './page-tools';
+import { executePageTool, extractCleanText }                             from './page-tools';
 
 type SessionState = 'idle' | 'armed' | 'editing' | 'streaming';
 
@@ -100,6 +100,10 @@ export class EditSession {
 
   cancel(): void {
     if (this.state === 'idle') return;
+    // Send explicit cancel before disconnecting for reliable abort
+    if (this.swPort) {
+      try { this.swPort.postMessage({ type: 'LANTHRA_CANCEL', sessionId: this.id }); } catch { /* port closed */ }
+    }
     this.cleanupCurrentHost();
     this.transition('armed');
     log('info', `session ${this.id} canceled (staying armed)`);
@@ -356,11 +360,23 @@ export class EditSession {
 
   // ── Prompt submission ─────────────────────────────────────────────────────
 
+  /** Regex matching pronoun references to surrounding text. */
+  private static TARGET_PRONOUNS = /\b(this|it|that|the\s+text|the\s+post|the\s+caption|the\s+content)\b/i;
+
   private submitPrompt(prompt: string): void {
     if (this.state !== 'editing') return;
     this.transition('streaming');
 
-    const context = this.buildContext();
+    const { context, extractedText } = this.buildContext();
+
+    // If the user's prompt references surrounding text with a pronoun,
+    // inject the extracted text directly into the prompt so the AI cannot
+    // miss it — regardless of how it reads the system-level context.
+    let finalPrompt = prompt;
+    if (extractedText && EditSession.TARGET_PRONOUNS.test(prompt)) {
+      finalPrompt = `${prompt}\n\nTarget text to modify:\n"""\n${extractedText}\n"""`;
+    }
+
     const port = chrome.runtime.connect({ name: `${PORT_SESSION_PREFIX}${this.id}` });
     this.swPort = port;
 
@@ -383,31 +399,107 @@ export class EditSession {
     port.postMessage({
       type:      'LANTHRA_PROMPT_SUBMIT',
       sessionId: this.id,
-      prompt,
+      prompt:    finalPrompt,
+      displayPrompt: prompt,
       context,
     });
 
     this.host?.enterStreamingMode();
-    log('info', `session ${this.id} prompt submitted`, { promptLength: prompt.length });
+    log('info', `session ${this.id} prompt submitted`, { promptLength: finalPrompt.length });
   }
 
-  private buildContext(): string {
+  private buildContext(): { context: string; extractedText: string } {
     const title = document.title ?? '';
     const url   = location.href;
 
-    // Local context: text near where the user is editing
-    let localContext = '';
-    if (this.anchorResult) {
-      const blockEl = this.anchorResult.anchor.closest(
-        'p, article, section, li, td, div, blockquote'
-      );
-      const raw = (blockEl ?? this.anchorResult.anchor.parentElement)?.textContent ?? '';
-      localContext = raw.trim().slice(0, 500);
+    // Priority 1: If the user had a text selection before clicking, use that
+    // as the definitive target text — it completely overrides DOM extraction.
+    const selection = window.getSelection()?.toString().trim() ?? '';
+    if (selection.length > 5) {
+      const localContext = selection.slice(0, 2000);
+      return {
+        context: `lanthra:inline\nTitle: ${title}\nURL: ${url}\nEditing near: ${localContext}`,
+        extractedText: localContext,
+      };
     }
 
-    // Lightweight metadata — full page content is fetched lazily via
-    // the get_page_content tool when the AI actually needs it.
-    return `lanthra:inline\nTitle: ${title}\nURL: ${url}\nEditing near: ${localContext}`;
+    // Local context: text near where the user is editing.
+    // Strategy: walk up from the anchor looking for a container with meaningful
+    // text. Instagram, Twitter, etc. wrap text in many layers of small <div>/<span>
+    // so we cannot just stop at the first <div>. Instead:
+    //   1. On known social sites, jump straight to the post/article container.
+    //   2. Otherwise prefer semantic elements (article, section, p, blockquote, li).
+    //   3. Fall back: walk up divs until we find one with enough text (>80 chars).
+    let localContext = '';
+    if (this.anchorResult) {
+      const anchor = this.anchorResult.anchor;
+      let container: Element | null = null;
+
+      // 1. Known social sites — use specific selectors for post containers
+      const host = location.hostname;
+      if (host.includes('instagram.com')) {
+        container = anchor.closest('article') ??
+          anchor.closest('div[role="presentation"]') ??
+          anchor.closest('div[role="dialog"]');
+      } else if (host.includes('x.com') || host.includes('twitter.com')) {
+        container = anchor.closest('article[data-testid="tweet"]');
+      } else if (host.includes('facebook.com')) {
+        container = anchor.closest('div[role="article"]');
+      } else if (host.includes('reddit.com')) {
+        container = anchor.closest('shreddit-post') ??
+          anchor.closest('div[data-testid="post-container"]') ??
+          anchor.closest('article');
+      } else if (host.includes('linkedin.com')) {
+        container = anchor.closest('div.feed-shared-update-v2') ??
+          anchor.closest('article');
+      }
+
+      // 2. Semantic elements (skip div — too common and granular)
+      if (!container) {
+        container = anchor.closest('article, section, p, blockquote, li, td, main');
+      }
+
+      // 3. Walk up divs looking for one with substantial text
+      if (!container) {
+        let node: Element | null = anchor.parentElement;
+        for (let i = 0; i < 12 && node; i++) {
+          if (node.tagName === 'DIV' || node.tagName === 'SPAN') {
+            const text = ((node as HTMLElement).innerText ?? node.textContent ?? '').trim();
+            if (text.length > 80) {
+              container = node;
+              break;
+            }
+          }
+          node = node.parentElement;
+        }
+      }
+
+      // 4. Ultimate fallback — nearest block-level ancestor so we capture
+      // text from sibling inline elements, not just anchor.parentElement.
+      if (!container) {
+        let node: Element | null = anchor.parentElement;
+        while (node && node !== document.body) {
+          const display = getComputedStyle(node).display;
+          if (/^(block|flex|grid|table|table-cell|list-item)$/.test(display)) {
+            container = node;
+            break;
+          }
+          node = node.parentElement;
+        }
+        if (!container) container = anchor.parentElement;
+      }
+
+      // Use TreeWalker-based extraction to skip SVGs, buttons, hidden elements.
+      // This prevents Instagram's UI chrome from filling the character budget.
+      if (container) {
+        localContext = extractCleanText(container, 2000);
+      }
+    }
+
+    return {
+      context: `lanthra:inline\nTitle: ${title}\nURL: ${url}\nEditing near: ${localContext}`,
+      extractedText: localContext,
+    };
   }
 
   // ── Token streaming ───────────────────────────────────────────────────────

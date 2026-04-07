@@ -30,14 +30,6 @@ const entries = [
     format:      'iife',
     platform:    'browser',
   },
-  // Page-world bridge injected via scripting.executeScript
-  {
-    ...shared,
-    entryPoints: ['src/page-script/bridge.ts'],
-    outfile:     'dist/page-bridge.js',
-    format:      'iife',
-    platform:    'browser',
-  },
   // Side panel script
   {
     ...shared,

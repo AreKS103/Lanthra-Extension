@@ -28,6 +28,26 @@ export class InlineHost {
   private sendBtn: HTMLSpanElement;
   private stopBtn: HTMLSpanElement;
 
+  // Document-level Escape handler during streaming (element loses focus)
+  private streamEscHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  // Slash command palette
+  private slashPalette: HTMLDivElement | null = null;
+  private slashSelectedIdx = 0;
+  private slashFiltered: { command: string; label: string; description: string; prompt: string }[] = [];
+
+  private static readonly SLASH_COMMANDS = [
+    { command: '/summarize',    label: 'Summarize',    description: 'Condense the text',          prompt: 'Summarize this text concisely' },
+    { command: '/bulletpoints', label: 'Bullets',       description: 'Convert to a bullet list',   prompt: 'Convert this to bullet points' },
+    { command: '/eli5',         label: 'ELI5',          description: 'Explain simply',             prompt: 'Explain this like I\'m 5 years old' },
+    { command: '/fixgrammar',   label: 'Fix Grammar',   description: 'Correct grammar & spelling', prompt: 'Fix the grammar and spelling' },
+    { command: '/shorten',      label: 'Shorten',       description: 'Make more concise',          prompt: 'Shorten this while preserving meaning' },
+    { command: '/expand',       label: 'Expand',        description: 'Add more detail',            prompt: 'Expand this with more detail' },
+    { command: '/formal',       label: 'Formal',        description: 'Formal tone',                prompt: 'Rewrite this in a formal tone' },
+    { command: '/casual',       label: 'Casual',        description: 'Casual tone',                prompt: 'Rewrite this in a casual, friendly tone' },
+    { command: '/translate',    label: 'Translate',      description: 'Translate the text',         prompt: 'Translate this to English' },
+  ];
+
   constructor(styles: MirroredStyles, opts: { blockDisplay?: boolean } = {}) {
     this.blockDisplay = opts.blockDisplay ?? false;
     this.element = document.createElement('span');
@@ -71,7 +91,7 @@ export class InlineHost {
       }
     });
 
-    this.stopBtn = this.createActionBtn('■', 'Stop generation', () => {
+    this.stopBtn = this.createActionBtn('■', 'Stop generation (Esc)', () => {
       if (this.phase === 'streaming') {
         this.onCancelCb?.();
       }
@@ -124,6 +144,7 @@ export class InlineHost {
 
   /** Clears the prompt and switches the host to output-only streaming mode. */
   enterStreamingMode(showThinking = true): void {
+    this.hideSlashPalette();
     this.phase = 'streaming';
     this.tokenBuffer = '';
     this.element.setAttribute('contenteditable', 'false');
@@ -154,6 +175,20 @@ export class InlineHost {
 
     this.sendBtn.style.display = 'none';
     this.stopBtn.style.display = 'inline-flex';
+    this.stopBtn.style.color = '#e55';
+    this.stopBtn.style.background = 'rgba(255,80,80,0.12)';
+
+    // Attach document-level Escape so the user can cancel even though
+    // contenteditable is off and the element can't receive keyboard focus.
+    this.removeStreamEscHandler();
+    this.streamEscHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && this.phase === 'streaming') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onCancelCb?.();
+      }
+    };
+    document.addEventListener('keydown', this.streamEscHandler, true);
   }
 
   /** Buffers a streaming token — will be flushed all at once on done. */
@@ -223,6 +258,7 @@ export class InlineHost {
     this.element.style.cursor       = 'pointer';
 
     // Hide action buttons
+    this.removeStreamEscHandler();
     this.sendBtn.style.display = 'none';
     this.stopBtn.style.display = 'none';
     this.actionsContainer.style.display = 'none';
@@ -261,6 +297,7 @@ export class InlineHost {
     this.outputNode = document.createTextNode('');
 
     // Show send button again
+    this.removeStreamEscHandler();
     this.sendBtn.style.display = 'inline-flex';
     this.stopBtn.style.display = 'none';
     this.actionsContainer.style.display = 'inline-flex';
@@ -273,7 +310,16 @@ export class InlineHost {
     this.focus();
   }
 
+  private removeStreamEscHandler(): void {
+    if (this.streamEscHandler) {
+      document.removeEventListener('keydown', this.streamEscHandler, true);
+      this.streamEscHandler = null;
+    }
+  }
+
   destroy(): void {
+    this.hideSlashPalette();
+    this.removeStreamEscHandler();
     this.onSubmitCb = null;
     this.onCancelCb = null;
     this.onReEditCb = null;
@@ -398,6 +444,36 @@ export class InlineHost {
 
   private handleKeyDown(e: KeyboardEvent): void {
     if (e.isComposing || this.isComposing) return;
+
+    // ── Slash palette navigation ──
+    if (this.slashPalette) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.slashSelectedIdx = Math.min(this.slashSelectedIdx + 1, this.slashFiltered.length - 1);
+        this.renderSlashHighlight();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.slashSelectedIdx = Math.max(this.slashSelectedIdx - 1, 0);
+        this.renderSlashHighlight();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.selectSlashCommand(this.slashSelectedIdx);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.hideSlashPalette();
+        return;
+      }
+    }
 
     // Detect platform modifier (Cmd on Mac, Ctrl everywhere else)
     const mod = e.metaKey || e.ctrlKey;
@@ -547,9 +623,115 @@ export class InlineHost {
     return offset; // fallback
   }
 
+  // ── Slash Command Palette ───────────────────────────────────────────────────
+
+  private showSlashPalette(filter: string): void {
+    const query = filter.toLowerCase();
+    this.slashFiltered = InlineHost.SLASH_COMMANDS.filter(
+      c => c.command.startsWith(query) || c.label.toLowerCase().includes(query.slice(1))
+    );
+
+    if (this.slashFiltered.length === 0) {
+      this.hideSlashPalette();
+      return;
+    }
+
+    this.slashSelectedIdx = Math.min(this.slashSelectedIdx, this.slashFiltered.length - 1);
+
+    if (!this.slashPalette) {
+      this.slashPalette = document.createElement('div');
+      this.slashPalette.setAttribute('data-lanthra-slash-palette', '');
+      this.slashPalette.style.cssText = [
+        'position:fixed',
+        'z-index:2147483647',
+        'background:#1e1e2e',
+        'border:1px solid rgba(255,255,255,0.12)',
+        'border-radius:8px',
+        'padding:4px',
+        'min-width:220px',
+        'max-width:300px',
+        'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
+        'font-size:13px',
+        'color:#cdd6f4',
+        'overflow:hidden',
+      ].join(';');
+      document.body.appendChild(this.slashPalette);
+    }
+
+    const rect = this.element.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    if (spaceBelow < 200) {
+      this.slashPalette.style.top = '';
+      this.slashPalette.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+    } else {
+      this.slashPalette.style.bottom = '';
+      this.slashPalette.style.top = `${rect.bottom + 4}px`;
+    }
+    this.slashPalette.style.left = `${rect.left}px`;
+
+    this.slashPalette.innerHTML = '';
+    this.slashFiltered.forEach((cmd, i) => {
+      const item = document.createElement('div');
+      item.style.cssText = [
+        'padding:6px 10px',
+        'border-radius:4px',
+        'cursor:pointer',
+        'display:flex',
+        'align-items:center',
+        'gap:8px',
+        i === this.slashSelectedIdx ? 'background:rgba(255,255,255,0.1)' : '',
+      ].join(';');
+      item.innerHTML =
+        `<span style="font-weight:600;color:#89b4fa">${cmd.command}</span>` +
+        `<span style="color:rgba(205,214,244,0.6);font-size:12px">${cmd.description}</span>`;
+      item.addEventListener('mouseenter', () => {
+        this.slashSelectedIdx = i;
+        this.renderSlashHighlight();
+      });
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.selectSlashCommand(i);
+      });
+      this.slashPalette!.appendChild(item);
+    });
+  }
+
+  private renderSlashHighlight(): void {
+    if (!this.slashPalette) return;
+    const items = this.slashPalette.children;
+    for (let i = 0; i < items.length; i++) {
+      (items[i] as HTMLElement).style.background =
+        i === this.slashSelectedIdx ? 'rgba(255,255,255,0.1)' : '';
+    }
+  }
+
+  private hideSlashPalette(): void {
+    if (this.slashPalette) {
+      this.slashPalette.remove();
+      this.slashPalette = null;
+    }
+    this.slashSelectedIdx = 0;
+    this.slashFiltered = [];
+  }
+
+  private selectSlashCommand(index: number): void {
+    const cmd = this.slashFiltered[index];
+    if (!cmd) return;
+    this.hideSlashPalette();
+    this.element.textContent = cmd.prompt;
+    this.promptText = cmd.prompt;
+    this.onSubmitCb?.(cmd.prompt);
+  }
+
   private syncPromptText(): void {
     if (this.phase === 'prompt') {
       this.promptText = this.element.textContent ?? '';
+      if (/^\/\S*$/.test(this.promptText)) {
+        this.showSlashPalette(this.promptText);
+      } else {
+        this.hideSlashPalette();
+      }
     }
   }
 

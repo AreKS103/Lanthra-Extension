@@ -1,6 +1,7 @@
 // sidepanel.ts — Lanthra side panel UI logic
 
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ const pageStatus      = document.getElementById('page-status')!;
 const btnClearChat    = document.getElementById('btn-clear-chat')!;
 const btnScrollBottom = document.getElementById('btn-scroll-bottom')!;
 const tabContext      = document.getElementById('tab-context')!;
+const tabFavicon      = document.getElementById('tab-favicon') as HTMLImageElement;
+const tabContextIcon  = document.getElementById('tab-context-icon')!;
 const tabContextText  = document.getElementById('tab-context-text')!;
 const modelSection    = document.getElementById('model-section')!;
 const ollamaSection   = document.getElementById('ollama-section')!;
@@ -50,6 +53,7 @@ const btnResetUsage   = document.getElementById('btn-reset-usage')!;
 const tabSettings     = document.getElementById('tab-settings')!;
 const tabUsage        = document.getElementById('tab-usage')!;
 const apiKeySection   = document.getElementById('api-key-section')!;
+const apiKeyLink      = document.getElementById('api-key-link') as HTMLAnchorElement;
 
 // ── Custom dropdown helper ───────────────────────────────────────────────────
 
@@ -168,6 +172,24 @@ document.addEventListener('click', () => {
 
 interface ModelEntry { id: string; name: string; }
 
+const API_KEY_LINKS: Record<string, { url: string; label: string }> = {
+  'openrouter': { url: 'https://openrouter.ai/keys',                   label: 'Get OpenRouter API Key' },
+  'anthropic':  { url: 'https://console.anthropic.com/settings/keys', label: 'Get Anthropic API Key' },
+  'openai':     { url: 'https://platform.openai.com/api-keys',        label: 'Get OpenAI API Key' },
+  'google':     { url: 'https://aistudio.google.com/app/apikey',      label: 'Get Google AI API Key' },
+  'deepseek':   { url: 'https://platform.deepseek.com/api_keys',      label: 'Get DeepSeek API Key' },
+  'mistralai':  { url: 'https://console.mistral.ai/api-keys',         label: 'Get Mistral API Key' },
+  'groq':       { url: 'https://console.groq.com/keys',               label: 'Get Groq API Key' },
+  'x-ai':       { url: 'https://console.x.ai/',                       label: 'Get xAI API Key' },
+  'perplexity': { url: 'https://www.perplexity.ai/settings/api',      label: 'Get Perplexity API Key' },
+  'meta-llama': { url: 'https://openrouter.ai/keys',                  label: 'Get API Key on OpenRouter' },
+  'qwen':       { url: 'https://openrouter.ai/keys',                  label: 'Get API Key on OpenRouter' },
+  'microsoft':  { url: 'https://openrouter.ai/keys',                  label: 'Get API Key on OpenRouter' },
+  'nvidia':     { url: 'https://build.nvidia.com/',                   label: 'Get NVIDIA API Key' },
+  'amazon':     { url: 'https://openrouter.ai/keys',                  label: 'Get API Key on OpenRouter' },
+  'nous':       { url: 'https://openrouter.ai/keys',                  label: 'Get API Key on OpenRouter' },
+};
+
 const PROVIDER_LABELS: Record<string, string> = {
   'anthropic':  'Anthropic',
   'openai':     'OpenAI',
@@ -191,6 +213,31 @@ const PROVIDER_ORDER = [
   'anthropic', 'openai', 'google', 'meta-llama', 'qwen', 'deepseek', 'mistralai',
   'groq', 'x-ai', 'microsoft', 'nvidia', 'amazon', 'perplexity', 'nous', 'openrouter', 'ollama',
 ];
+
+// ── Provider routing helpers ─────────────────────────────────────────────────
+
+const OPENROUTER_ONLY = new Set([
+  'meta-llama', 'qwen', 'microsoft', 'amazon', 'nous', 'openrouter',
+]);
+
+function providerKeyName(p: string): string {
+  return OPENROUTER_ONLY.has(p) ? 'lanthra_key_openrouter' : `lanthra_key_${p}`;
+}
+
+const PROVIDER_PLACEHOLDERS: Record<string, string> = {
+  'anthropic':  'sk-ant-…',
+  'openai':     'sk-…',
+  'google':     'AIza…',
+  'groq':       'gsk_…',
+  'deepseek':   'sk-…',
+  'mistralai':  '…',
+  'x-ai':       'xai-…',
+  'nvidia':     'nvapi-…',
+  'perplexity': 'pplx-…',
+  'openrouter': 'sk-or-…',
+};
+
+let currentProvider = 'anthropic';
 
 let modelsByProvider: Record<string, ModelEntry[]> = {};
 let providerKeys: string[] = [];
@@ -279,12 +326,6 @@ async function fetchAllModels(): Promise<void> {
         { id: 'mistralai/mistral-large', name: 'Mistral Large' },
         { id: 'mistralai/mistral-small', name: 'Mistral Small' },
       ],
-      groq: [
-        { id: 'groq/llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Groq)' },
-        { id: 'groq/llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Groq)' },
-        { id: 'groq/gemma2-9b-it', name: 'Gemma 2 9B (Groq)' },
-        { id: 'groq/mixtral-8x7b-32768', name: 'Mixtral 8x7B (Groq)' },
-      ],
       'x-ai': [
         { id: 'x-ai/grok-2-1212', name: 'Grok 2' },
       ],
@@ -298,7 +339,7 @@ async function fetchAllModels(): Promise<void> {
 function buildProviderKeys(): void {
   providerKeys = [];
   for (const p of PROVIDER_ORDER) {
-    if (p === 'ollama' || p === 'openrouter' || modelsByProvider[p]) {
+    if (p === 'ollama' || p === 'openrouter' || p === 'groq' || modelsByProvider[p]) {
       providerKeys.push(p);
     }
   }
@@ -314,6 +355,7 @@ function populateProviders(): void {
 
 async function populateModels(providerKey: string): Promise<void> {
   if (providerKey === 'ollama') { await populateOllamaModels(); return; }
+  if (providerKey === 'groq')   { await populateGroqModels();   return; }
   const raw = providerKey === 'openrouter'
     ? Object.values(modelsByProvider).flat()
     : (modelsByProvider[providerKey] ?? []);
@@ -368,11 +410,30 @@ function appendCustomModelInput(): void {
 
 type PanelState = 'idle' | 'armed' | 'editing' | 'streaming';
 let currentState: PanelState = 'idle';
+
+function setTabFavicon(url: string | undefined): void {
+  if (url) {
+    tabFavicon.src = url;
+    tabFavicon.style.display = '';
+    tabContextIcon.style.display = 'none';
+    tabFavicon.onerror = () => {
+      tabFavicon.style.display = 'none';
+      tabContextIcon.style.display = '';
+    };
+  } else {
+    tabFavicon.style.display = 'none';
+    tabContextIcon.style.display = '';
+  }
+}
+
 // Tracks whether a panel chat stream is currently active.
 let panelStreamingActive = false;
 // Tracks the tab ID where the current stream was initiated,
 // so cancel/stop works even if the user switches tabs mid-stream.
 let streamingTabId: number | null = null;
+// Session ID of the current panel chat stream — used to ignore stale
+// CHAT_END/CHAT_ERROR broadcasts from unrelated (e.g. inline) sessions.
+let panelStreamSessionId: string | null = null;
 
 function updateUI(state: PanelState): void {
   currentState = state;
@@ -420,6 +481,10 @@ let skipNextUserEcho = false;
 // buffer is re-parsed with `marked` and set as innerHTML on the bubble. This
 // gives smooth progressive markdown rendering.
 let streamingMarkdownBuffer = '';
+
+// ── Auto-scroll state ──
+// When the user scrolls up during streaming, stop forcing scroll to bottom.
+let userHasScrolledUp = false;
 
 // ── Thinking block state ──
 // Models like Qwen3, DeepSeek R1 emit <think>…</think> tags.
@@ -541,7 +606,8 @@ function appendAIToken(token: string): void {
       remaining = '';
     }
   }
-  scrollToBottom();
+  // Only auto-scroll during streaming if user hasn't scrolled up
+  if (!userHasScrolledUp) scrollToBottom();
 }
 
 /** Append a normal (non-thinking) token to the AI bubble with live markdown rendering. */
@@ -654,6 +720,7 @@ function scrollToBottom(): void {
     content.scrollTop = content.scrollHeight;
     btnScrollBottom.classList.remove('visible');
   }
+  userHasScrolledUp = false;
 }
 
 // ── Chat input state ─────────────────────────────────────────────────────────
@@ -784,11 +851,18 @@ chrome.runtime.onMessage.addListener((msg) => {
         panelStreamingActive = true;
         updateUI(currentState); // refresh stop/send button from new panelStreamingActive
       }
+      // Track session ID from first token if we didn't get it from sendResponse
+      if (!panelStreamSessionId && msg.sessionId) {
+        panelStreamSessionId = msg.sessionId;
+      }
       appendAIToken(msg.token);
       break;
     case 'LANTHRA_CHAT_END':
+      // Ignore stale END broadcasts from unrelated sessions (e.g. inline edits)
+      if (panelStreamSessionId && msg.sessionId && msg.sessionId !== panelStreamSessionId) break;
       panelStreamingActive = false;
       streamingTabId = null;
+      panelStreamSessionId = null;
       endAIMessage();
       updateUI('idle');
       // Only deactivate content script for panel-initiated prompts.
@@ -802,8 +876,11 @@ chrome.runtime.onMessage.addListener((msg) => {
       }
       break;
     case 'LANTHRA_CHAT_ERROR':
+      // Ignore stale ERROR broadcasts from unrelated sessions
+      if (panelStreamSessionId && msg.sessionId && msg.sessionId !== panelStreamSessionId) break;
       panelStreamingActive = false;
       streamingTabId = null;
+      panelStreamSessionId = null;
       addErrorMessage(msg.error);
       updateUI('idle');
       break;
@@ -821,6 +898,7 @@ chrome.runtime.onMessage.addListener((msg) => {
       }
       tabContextText.textContent = display;
       tabContext.title = msg.title || url;
+      setTabFavicon(msg.favIconUrl as string | undefined);
       // Update streaming visual state
       if (panelStreamingActive) {
         tabContext.classList.add('streaming');
@@ -834,14 +912,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 // (Provider and model change handlers are set up in init() via createDropdown)
 
-// ── API key ──────────────────────────────────────────────────────────────────
-
-chrome.storage.local.get(['lanthra_api_key'], (result) => {
-  if (result.lanthra_api_key) {
-    apiKeyInput.value = '••••••••••';
-    apiKeyInput.dataset.saved = 'true';
-  }
-});
+// ── API key (provider-aware) ─────────────────────────────────────────────────
 
 apiKeyInput.addEventListener('focus', () => {
   if (apiKeyInput.dataset.saved === 'true') {
@@ -850,17 +921,33 @@ apiKeyInput.addEventListener('focus', () => {
   }
 });
 
-btnSaveKey.addEventListener('click', () => {
+apiKeyInput.addEventListener('blur', () => {
+  if (apiKeyInput.dataset.saved === 'false' && !apiKeyInput.value.trim()) {
+    const keyName = providerKeyName(currentProvider);
+    chrome.storage.local.get([keyName], (result) => {
+      if (result[keyName]) {
+        apiKeyInput.value = '••••••••••';
+        apiKeyInput.dataset.saved = 'true';
+      }
+    });
+  }
+});
+
+btnSaveKey.addEventListener('click', async () => {
   const key = apiKeyInput.value.trim();
   if (!key || key === '••••••••••') return;
 
-  chrome.storage.local.set({ lanthra_api_key: key }, () => {
+  const keyName = providerKeyName(currentProvider);
+  chrome.storage.local.set({ [keyName]: key }, () => {
     apiKeyInput.value = '••••••••••';
     apiKeyInput.dataset.saved = 'true';
     keyStatus.textContent = 'Key saved';
     keyStatus.className = 'key-status saved';
     setTimeout(() => { keyStatus.textContent = ''; }, 2000);
   });
+
+  // Re-fetch live models for Groq when key is saved
+  if (currentProvider === 'groq') await populateGroqModels();
 });
 
 // ── Chat input auto-resize ──────────────────────────────────────────────────
@@ -882,6 +969,7 @@ async function handleSendOrStop(): Promise<void> {
     }
     panelStreamingActive = false;
     streamingTabId = null;
+    panelStreamSessionId = null;
     endAIMessage();
     hideThinkingIndicator();
     updateUI(currentState);
@@ -901,18 +989,21 @@ async function handleSendOrStop(): Promise<void> {
   // Mark panel streaming active BEFORE updateUI so the stop button appears.
   panelStreamingActive = true;
   streamingTabId = tab.id;
+  panelStreamSessionId = null; // will be set when CS responds
   updateUI('streaming');
 
   // Forward prompt to content script which will trigger the AI flow.
   try {
-    await chrome.tabs.sendMessage(tab.id, {
+    const resp = await chrome.tabs.sendMessage(tab.id, {
       type: 'LANTHRA_PANEL_PROMPT',
       prompt: text,
     });
+    if (resp?.sessionId) panelStreamSessionId = resp.sessionId;
   } catch {
     // Content script not reachable on this tab.
     panelStreamingActive = false;
     streamingTabId = null;
+    panelStreamSessionId = null;
     hideThinkingIndicator();
     addErrorMessage('Cannot connect to the page. Try refreshing or re-activating Lanthra on this tab.');
     updateUI('idle');
@@ -947,8 +1038,20 @@ async function init(): Promise<void> {
   chrome.runtime.connect({ name: 'lanthra:sidepanel' });
 
   // Create dropdown states with change handlers
+  // ── Migrate legacy key names ──────────────────────────────────────────────
+  const legacy = await chrome.storage.local.get([
+    'lanthra_api_key', 'lanthra_groq_key', 'lanthra_key_openrouter', 'lanthra_key_groq',
+  ]);
+  if (legacy.lanthra_api_key && !legacy.lanthra_key_openrouter) {
+    await chrome.storage.local.set({ lanthra_key_openrouter: legacy.lanthra_api_key });
+  }
+  if (legacy.lanthra_groq_key && !legacy.lanthra_key_groq) {
+    await chrome.storage.local.set({ lanthra_key_groq: legacy.lanthra_groq_key });
+  }
+
   providerDD = createDropdown(providerWrap, providerTrigger, providerDropdown, async (key) => {
     chrome.storage.local.set({ lanthra_provider: key });
+    currentProvider = key;
     toggleProviderUI(key);
     if (key === 'ollama') {
       await populateOllamaModels();
@@ -967,6 +1070,7 @@ async function init(): Promise<void> {
 
   const saved = await chrome.storage.local.get(['lanthra_provider']);
   const provider = saved.lanthra_provider ?? 'anthropic';
+  currentProvider = provider;
   const providerLabel = PROVIDER_LABELS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);
   setDropdownValue(providerDD, provider, providerLabel);
   toggleProviderUI(provider);
@@ -997,6 +1101,7 @@ async function init(): Promise<void> {
         tabContextText.textContent = tab.url.slice(0, 40);
       }
       tabContext.title = tab.title || tab.url;
+      setTabFavicon(tab.favIconUrl);
     }
   } catch { /* no tab */ }
 }
@@ -1037,9 +1142,20 @@ function renderMarkdown(text: string): string {
     return result.trim();
   });
 
-  // Use marked for full markdown parsing (synchronous)
-  const html = marked.parse(processed, { async: false }) as string;
-  return html;
+  // Use marked for full markdown parsing (synchronous), then sanitize
+  const raw = marked.parse(processed, { async: false }) as string;
+  return DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'del', 'ins',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+      'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'hr', 'sup', 'sub', 'span', 'div', 'details', 'summary',
+    ],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'title', 'class', 'id'],
+    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ['target'],
+  });
 }
 
 // ── Chat session caching (chrome.storage.session — survives panel toggles, clears on browser close) ──
@@ -1211,6 +1327,7 @@ btnScrollBottom.addEventListener('click', () => {
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     btnScrollBottom.classList.remove('visible');
   }
+  userHasScrolledUp = false;
 });
 
 const contentArea = chatMessages.closest('.content');
@@ -1219,8 +1336,10 @@ if (contentArea) {
     const distFromBottom = contentArea.scrollHeight - contentArea.scrollTop - contentArea.clientHeight;
     if (distFromBottom > 100) {
       btnScrollBottom.classList.add('visible');
+      userHasScrolledUp = true;
     } else {
       btnScrollBottom.classList.remove('visible');
+      userHasScrolledUp = false;
     }
   });
 }
@@ -1320,24 +1439,107 @@ init();
 // ── Ollama helpers ──────────────────────────────────────────────────────────
 
 function toggleProviderUI(provider: string): void {
+  currentProvider = provider;
   const isOllama = provider === 'ollama';
-  // Ollama: show endpoint + model, hide API key
-  // Others: show model + API key, hide endpoint
-  ollamaSection.style.display   = isOllama ? '' : 'none';
-  apiKeySection.style.display   = isOllama ? 'none' : '';
+
+  ollamaSection.style.display   = isOllama  ? '' : 'none';
+  apiKeySection.style.display   = isOllama  ? 'none' : '';
   modelSection.style.display    = '';
+
   if (isOllama) {
     chrome.storage.local.get(['lanthra_ollama_url'], (result) => {
       ollamaUrlInput.value = result.lanthra_ollama_url || 'http://localhost:11434';
     });
+    return;
+  }
+
+  // Set provider-specific placeholder
+  apiKeyInput.placeholder = PROVIDER_PLACEHOLDERS[provider] ?? 'API key…';
+
+  // Update API key link
+  const link = API_KEY_LINKS[provider];
+  if (link) {
+    apiKeyLink.href        = link.url;
+    apiKeyLink.textContent = link.label + ' →';
+    apiKeyLink.style.display = '';
   } else {
-    // Refresh API key display when switching to a non-Ollama provider
-    chrome.storage.local.get(['lanthra_api_key'], (result) => {
-      if (result.lanthra_api_key) {
-        apiKeyInput.value = '••••••••••';
-        apiKeyInput.dataset.saved = 'true';
+    apiKeyLink.style.display = 'none';
+  }
+
+  // Load stored key for this provider
+  const keyName = providerKeyName(provider);
+  keyStatus.textContent = '';
+  chrome.storage.local.get([keyName], (result) => {
+    if (result[keyName]) {
+      apiKeyInput.value = '••••••••••';
+      apiKeyInput.dataset.saved = 'true';
+    } else {
+      apiKeyInput.value = '';
+      delete apiKeyInput.dataset.saved;
+    }
+  });
+}
+
+// ── Groq live models ─────────────────────────────────────────────────────────
+
+const GROQ_FALLBACK: ModelEntry[] = [
+  { id: 'llama-3.3-70b-versatile',         name: 'Llama 3.3 70B Versatile' },
+  { id: 'llama-3.1-70b-versatile',          name: 'Llama 3.1 70B Versatile' },
+  { id: 'llama-3.1-8b-instant',             name: 'Llama 3.1 8B Instant' },
+  { id: 'llama3-70b-8192',                   name: 'Llama 3 70B' },
+  { id: 'llama3-8b-8192',                    name: 'Llama 3 8B' },
+  { id: 'deepseek-r1-distill-llama-70b',    name: 'DeepSeek R1 Distill Llama 70B' },
+  { id: 'qwen-qwq-32b',                      name: 'Qwen QwQ 32B' },
+  { id: 'gemma2-9b-it',                      name: 'Gemma 2 9B IT' },
+  { id: 'mixtral-8x7b-32768',               name: 'Mixtral 8x7B' },
+];
+
+function groqModelDisplayName(id: string): string {
+  return id
+    .replace(/-(\.?\d)/g, ' $1')
+    .replace(/-/g, ' ')
+    .replace(/\b(\w)/g, c => c.toUpperCase())
+    .trim();
+}
+
+async function populateGroqModels(): Promise<void> {
+  const stored = await chrome.storage.local.get(['lanthra_key_groq', 'lanthra_model']);
+  const groqKey = (stored.lanthra_key_groq as string | undefined) ?? '';
+
+  let models = GROQ_FALLBACK.slice();
+
+  if (groqKey) {
+    try {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10_000);
+      const resp  = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { 'Authorization': `Bearer ${groqKey}` },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = await resp.json() as { data?: Array<{ id: string }> };
+        const live = (data.data ?? [])
+          .filter(m => !m.id.includes('whisper') && !m.id.includes('-tool-use') && !m.id.includes('guard'))
+          .map(m => ({ id: m.id, name: groqModelDisplayName(m.id) }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (live.length > 0) models = live;
       }
-    });
+    } catch (_) {
+      // fall through to hardcoded fallback
+    }
+  }
+
+  const items = models.map(m => ({ value: m.id, label: m.name }));
+  populateDropdown(modelDD, items, true);
+  appendCustomModelInput();
+
+  const savedModel = stored.lanthra_model as string | undefined;
+  if (savedModel) {
+    const match = models.find(m => m.id === savedModel);
+    setDropdownValue(modelDD, savedModel, match ? match.name : savedModel);
+  } else if (models.length > 0) {
+    setDropdownValue(modelDD, models[0]!.id, models[0]!.name);
   }
 }
 
@@ -1347,10 +1549,6 @@ async function populateOllamaModels(): Promise<void> {
 
   try {
     const resp = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/tags`);
-    if (resp.status === 403) {
-      showOllamaCorsHelp();
-      return;
-    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const models: ModelEntry[] = (data.models || []).map((m: Record<string, unknown>) => ({
@@ -1372,55 +1570,28 @@ async function populateOllamaModels(): Promise<void> {
     ollamaStatus.textContent = `\u2713 Connected - ${models.length} model${models.length !== 1 ? 's' : ''}`;
     ollamaStatus.className = 'key-status saved';
   } catch {
-    // Network error (CORS block shows as TypeError, not 403)
-    showOllamaCorsHelp();
+    showOllamaError();
   }
 }
 
-function showOllamaCorsHelp(): void {
-  const isWin = navigator.userAgent.includes('Windows');
-  ollamaStatus.innerHTML = '';
+function showOllamaError(): void {
+  ollamaStatus.textContent = '\u2717 Cannot detect Ollama. Make sure it is running.';
   ollamaStatus.className = 'key-status error';
-
-  const line1 = document.createElement('span');
-  line1.textContent = '\u2717 Cannot connect to Ollama';
-  ollamaStatus.appendChild(line1);
-
-  const helpBlock = document.createElement('div');
-  helpBlock.style.cssText = 'margin-top:6px;font-size:11px;line-height:1.5;color:#bbb';
-
-  if (isWin) {
-    helpBlock.innerHTML =
-      'Ollama needs CORS enabled for browser extensions.<br>' +
-      '<b>Quick fix (PowerShell):</b><br>' +
-      '<code style=\"background:#1a1a1a;padding:2px 5px;border-radius:3px;font-size:10px;user-select:all\">' +
-      'Stop-Process -Name ollama -Force -EA 0; ' +
-      '$env:OLLAMA_ORIGINS=&quot;*&quot;; ollama serve' +
-      '</code><br>' +
-      '<span style=\"color:#888\">Or set OLLAMA_ORIGINS=* as a system env variable for a permanent fix.</span>';
-  } else {
-    helpBlock.innerHTML =
-      'Ollama needs CORS enabled for browser extensions.<br>' +
-      '<b>Quick fix:</b><br>' +
-      '<code style=\"background:#1a1a1a;padding:2px 5px;border-radius:3px;font-size:10px;user-select:all\">' +
-      'OLLAMA_ORIGINS=* ollama serve' +
-      '</code>';
-  }
-  ollamaStatus.appendChild(helpBlock);
 }
 
 // Connection test
 btnTestOllama.addEventListener('click', async () => {
   const url = ollamaUrlInput.value.trim() || 'http://localhost:11434';
-  ollamaStatus.textContent = 'Testing\u2026';
+  if (!isLocalUrl(url)) {
+    ollamaStatus.textContent = '✗ Ollama URL must be localhost (127.0.0.1, ::1, or localhost).';
+    ollamaStatus.className = 'key-status error';
+    return;
+  }
+  ollamaStatus.textContent = 'Testing…';
   ollamaStatus.className = 'key-status';
 
   try {
     const resp = await fetch(`${url.replace(/\/+$/, '')}/api/tags`);
-    if (resp.status === 403) {
-      showOllamaCorsHelp();
-      return;
-    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const count = data.models?.length ?? 0;
@@ -1430,12 +1601,20 @@ btnTestOllama.addEventListener('click', async () => {
     chrome.storage.local.set({ lanthra_ollama_url: url });
     await populateOllamaModels();
   } catch {
-    showOllamaCorsHelp();
+    showOllamaError();
   }
 });
 
 // Auto-save Ollama URL on blur
 ollamaUrlInput.addEventListener('blur', () => {
   const url = ollamaUrlInput.value.trim();
-  if (url) chrome.storage.local.set({ lanthra_ollama_url: url });
+  if (url && isLocalUrl(url)) chrome.storage.local.set({ lanthra_ollama_url: url });
 });
+
+/** Only allow localhost Ollama URLs to prevent SSRF. */
+function isLocalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+  } catch { return false; }
+}

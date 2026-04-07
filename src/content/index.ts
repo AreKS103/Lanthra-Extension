@@ -50,8 +50,10 @@ chrome.runtime.onMessage.addListener(
 
     if (m['type'] === 'LANTHRA_CANCEL_FROM_PANEL') {
       log('info', 'CS: cancel from panel');
-      // Cancel panel-initiated prompt if active
+      // Cancel panel-initiated prompt if active — send explicit CANCEL
+      // before disconnecting so the SW aborts during both thinking and streaming.
       if (panelPromptPort) {
+        try { panelPromptPort.postMessage({ type: 'LANTHRA_CANCEL' }); } catch { /* port closed */ }
         try { panelPromptPort.disconnect(); } catch { /* already closed */ }
         panelPromptPort = null;
       }
@@ -96,7 +98,7 @@ chrome.runtime.onMessage.addListener(
         }
       });
 
-      sendResponse({ ok: true });
+      sendResponse({ ok: true, sessionId: chatId });
       return;
     }
 

@@ -7,7 +7,7 @@ export type SessionId = string;
 
 export type CSMessage =
   | { type: 'LANTHRA_PROMPT_SUBMIT'; sessionId: SessionId; prompt: string; context: string;
-      imageUrl?: string; imageBase64?: string; imageMediaType?: string; imageOnly?: boolean }
+      displayPrompt?: string; imageUrl?: string; imageBase64?: string; imageMediaType?: string; imageOnly?: boolean }
   | { type: 'LANTHRA_CANCEL';        sessionId: SessionId }
   | { type: 'LANTHRA_PING' }
   | { type: 'LANTHRA_TOOL_RESULT';   id: string; result: string };

@@ -324,9 +324,10 @@ function extractCompactMetadata(): string {
     }
   }
 
-  // JSON-LD: extract key fields only
+  // JSON-LD: extract key fields only (limit size to prevent abuse)
   for (const script of Array.from(document.querySelectorAll('script[type="application/ld+json"]'))) {
     try {
+      if ((script.textContent?.length ?? 0) > 100_000) continue;
       const data = JSON.parse(script.textContent || '');
       const items = Array.isArray(data) ? data : [data];
       for (const item of items) {
@@ -493,4 +494,66 @@ function extractSocialProfile(): string {
 
   if (Object.keys(info).length === 0) return '';
   return 'SOCIAL_PROFILE\n' + Object.entries(info).map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
+// ── Clean text extraction via TreeWalker ──────────────────────────────────────
+
+/** Tags whose text content is UI chrome, not page content. */
+const REJECT_TAGS = new Set([
+  'SVG', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'SCRIPT', 'STYLE',
+  'NOSCRIPT', 'NAV', 'HEADER', 'FOOTER', 'OPTION', 'IFRAME',
+]);
+
+/**
+ * Walk an element's subtree collecting only visible, human-readable text.
+ * Rejects text nodes whose parent is an SVG, button, hidden element, etc.
+ * This avoids the invisible ARIA / SVG / UI junk that pollutes innerText on
+ * sites like Instagram.
+ */
+export function extractCleanText(root: Element, maxLen = 2000): string {
+  const parts: string[] = [];
+  let len = 0;
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Text): number {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+
+      // Reject text inside SVG, BUTTON, SCRIPT, etc.
+      let el: Element | null = parent;
+      while (el && el !== root) {
+        if (REJECT_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
+        // Skip text inside the Lanthra inline host — this is the user's prompt,
+        // not page content.
+        if (el.hasAttribute('data-lanthra-anchor') || el.hasAttribute('data-lanthra-host')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        el = el.parentElement;
+      }
+
+      // Reject invisible elements
+      const style = getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return NodeFilter.FILTER_REJECT;
+      }
+
+      // Reject empty or whitespace-only nodes
+      const text = node.textContent ?? '';
+      if (!text.trim()) return NodeFilter.FILTER_REJECT;
+
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  let current: Text | null;
+  while ((current = walker.nextNode() as Text | null)) {
+    if (len >= maxLen) break;
+    const text = (current.textContent ?? '').trim();
+    if (text) {
+      parts.push(text);
+      len += text.length + 1;
+    }
+  }
+
+  return parts.join(' ').slice(0, maxLen);
 }
