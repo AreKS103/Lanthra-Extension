@@ -82,6 +82,7 @@ function onContentScriptConnect(port: chrome.runtime.Port): void {
           const imageBase64 = msg.imageBase64;
           const imageMediaType = msg.imageMediaType;
           const imageOnly = !!msg.imageOnly;
+          const chatHistory = msg.history;
           const isPanelPrompt = (msg.context ?? '').startsWith('lanthra:page\n');
 
           // Always show user message in panel, even for image-only prompts.
@@ -117,7 +118,7 @@ function onContentScriptConnect(port: chrome.runtime.Port): void {
                 completionTokens: usage.completionTokens,
               });
             },
-          }, createToolExecutor(), imageUrl, imageBase64, imageMediaType);
+          }, createToolExecutor(), imageUrl, imageBase64, imageMediaType, chatHistory);
         }
         break;
       case 'LANTHRA_CANCEL':

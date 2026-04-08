@@ -55,6 +55,12 @@ const tabUsage        = document.getElementById('tab-usage')!;
 const apiKeySection   = document.getElementById('api-key-section')!;
 const apiKeyLink      = document.getElementById('api-key-link') as HTMLAnchorElement;
 
+// Highlight context DOM refs
+const highlightCtx       = document.getElementById('highlight-context')!;
+const highlightHeader    = document.getElementById('highlight-context-header')!;
+const highlightBody      = document.getElementById('highlight-context-body')!;
+const highlightClear     = document.getElementById('highlight-context-clear')!;
+
 // ── Custom dropdown helper ───────────────────────────────────────────────────
 
 interface DropdownState {
@@ -993,10 +999,22 @@ async function handleSendOrStop(): Promise<void> {
   updateUI('streaming');
 
   // Forward prompt to content script which will trigger the AI flow.
+  // If the user has highlighted text, attach it so the CS can build
+  // a constrained context for the AI.
+  const highlightPayload = currentHighlight || undefined;
+
+  // Build conversation history for multi-turn context (exclude the message we just added)
+  const historyForAI = sessionHistory
+    .slice(0, -1) // exclude the just-added user message (it's sent as `prompt`)
+    .filter(m => m.role !== 'error')
+    .map(m => ({ role: (m.role === 'ai' ? 'assistant' : 'user') as 'user' | 'assistant', content: m.content }));
+
   try {
     const resp = await chrome.tabs.sendMessage(tab.id, {
       type: 'LANTHRA_PANEL_PROMPT',
       prompt: text,
+      highlightedText: highlightPayload,
+      history: historyForAI.length > 0 ? historyForAI : undefined,
     });
     if (resp?.sessionId) panelStreamSessionId = resp.sessionId;
   } catch {
@@ -1014,6 +1032,11 @@ async function handleSendOrStop(): Promise<void> {
   chatInput.value = '';
   chatInput.style.height = 'auto';
   syncInputState();
+
+  // Consume the highlight — clear it after sending
+  if (highlightPayload) {
+    setHighlightText('');
+  }
 }
 
 btnSend.addEventListener('click', handleSendOrStop);
@@ -1343,6 +1366,73 @@ if (contentArea) {
     }
   });
 }
+
+// ── Highlight context (selection tracking) ──────────────────────────────────
+
+let currentHighlight = '';
+let highlightDismissed = false;
+
+function setHighlightText(text: string): void {
+  if (highlightDismissed && text) return; // user dismissed; don't re-show same selection
+  currentHighlight = text;
+  if (text) {
+    highlightBody.textContent = text;
+    highlightCtx.classList.remove('hidden');
+  } else {
+    highlightCtx.classList.add('hidden');
+    highlightCtx.classList.remove('open');
+    highlightDismissed = false; // reset dismiss on clear
+  }
+}
+
+highlightHeader.addEventListener('click', () => {
+  highlightCtx.classList.toggle('open');
+});
+
+highlightClear.addEventListener('click', (e) => {
+  e.stopPropagation();
+  highlightDismissed = true;
+  currentHighlight = '';
+  highlightCtx.classList.add('hidden');
+  highlightCtx.classList.remove('open');
+});
+
+// Listen for selection changes from the active tab's content script
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === 'LANTHRA_SELECTION_CHANGED') {
+    if (typeof msg.text === 'string') {
+      highlightDismissed = false;
+      setHighlightText(msg.text);
+    }
+  }
+});
+
+// Poll current selection when sidepanel opens or active tab changes
+async function fetchCurrentSelection(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: 'LANTHRA_GET_SELECTION' });
+    if (resp?.text && typeof resp.text === 'string') {
+      highlightDismissed = false;
+      setHighlightText(resp.text);
+    } else {
+      setHighlightText('');
+    }
+  } catch {
+    setHighlightText('');
+  }
+}
+
+// Fetch on load
+fetchCurrentSelection();
+
+// Clear highlight when switching tabs (new tab has no selection)
+chrome.tabs.onActivated?.addListener(() => {
+  setHighlightText('');
+  // Then query the new tab for its selection
+  setTimeout(fetchCurrentSelection, 150);
+});
 
 // ── Settings modal tab switching ────────────────────────────────────────────
 

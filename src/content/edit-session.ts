@@ -24,6 +24,27 @@ import { executePageTool, extractCleanText }                             from '.
 
 type SessionState = 'idle' | 'armed' | 'editing' | 'streaming';
 
+/**
+ * Walk up from a block element to a more meaningful aggregate container.
+ * LI → parent UL/OL so the whole list gets one hover box.
+ * Block elements inside semantic wrappers → go up one level.
+ * Body/documentElement — never used as target.
+ */
+function broadenHoverTarget(el: Element): Element {
+  const parent = el.parentElement;
+  if (!parent || parent === document.body || parent === document.documentElement) return el;
+  const tag  = el.tagName;
+  const pTag = parent.tagName;
+  // List items → aggregate to the whole list container
+  if (tag === 'LI' && (pTag === 'UL' || pTag === 'OL')) return parent;
+  // Paragraphs / headings / spans inside semantic containers → go up
+  if (
+    ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(tag) &&
+    ['BLOCKQUOTE', 'FIGURE', 'FIGCAPTION', 'DETAILS', 'SUMMARY'].includes(pTag)
+  ) return parent;
+  return el;
+}
+
 // Overlay element shown while armed to change the cursor site-wide
 let armOverlay: HTMLDivElement | null = null;
 // Hover affordance element
@@ -281,10 +302,11 @@ export class EditSession {
     this.hideImageHighlight();
     const hit = hitTest(e.clientX, e.clientY);
     if (hit) {
-      // Use block-level ancestor so the entire paragraph/block gets one box
-      const block = nearestBlockAncestor(hit.element);
-      if (block !== hoverTarget) {
-        hoverTarget = block;
+      // Use block-level ancestor so the entire paragraph/block gets one box,
+      // then broaden to the aggregate container (e.g. OL/UL for list items).
+      const block    = nearestBlockAncestor(hit.element);
+      const broader  = broadenHoverTarget(block);
+      if (broader !== hoverTarget) {
         this.showHoverOutline(block);
       }
     }
@@ -613,8 +635,11 @@ export class EditSession {
 
   private showHoverOutline(el: Element): void {
     this.hideHoverOutline();
-    hoverTarget = el as HTMLElement;
-    const r = el.getBoundingClientRect();
+    // Broaden to an aggregate container (e.g. OL/UL for LI elements) so the
+    // box spans the whole block rather than hugging each individual element.
+    const container = broadenHoverTarget(el);
+    hoverTarget = container as HTMLElement;
+    const r = container.getBoundingClientRect();
     if (!hoverOutline) {
       hoverOutline = document.createElement('div');
       hoverOutline.setAttribute('data-lanthra-hover', '');

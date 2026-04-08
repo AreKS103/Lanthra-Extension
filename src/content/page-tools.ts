@@ -23,8 +23,9 @@ export function executePageTool(name: string): string {
     case 'get_selected_text':  return toolGetSelectedText();
     case 'get_editor_content': return toolGetEditorContent();
     case 'get_pdf_text':       return toolGetPdfText();
-    case 'get_page_images':    return toolGetPageImages();
-    default:                   return `Unknown tool: "${name}"`;
+    case 'get_page_images':       return toolGetPageImages();
+    case 'locate_page_element':   return toolLocatePageElement();
+    default:                      return `Unknown tool: "${name}"`;
   }
 }
 
@@ -274,32 +275,89 @@ function getBestFromSrcset(srcset: string): string {
   return candidates[0]?.url ?? '';
 }
 
-// ── PDF extraction ────────────────────────────────────────────────────────────
+// ── PDF / Document extraction ─────────────────────────────────────────────────
 
 function toolGetPdfText(): string {
+  // Strategy 1: pdf.js text layer (Mozilla PDF viewer, many LMS embedded viewers)
   const textLayers = document.querySelectorAll('.textLayer span, [data-page-no] span');
-  if (textLayers.length === 0) {
-    return 'No PDF text layer found. The page may use a non-pdf.js viewer or the PDF is image-based.';
+  if (textLayers.length > 0) {
+    const pages = new Map<number, string[]>();
+    textLayers.forEach(span => {
+      const page = span.closest('[data-page-number], [data-page-no], .page');
+      const pageNum = parseInt(page?.getAttribute('data-page-number') || page?.getAttribute('data-page-no') || '0') || 0;
+      if (!pages.has(pageNum)) pages.set(pageNum, []);
+      const text = span.textContent || '';
+      if (text.trim()) pages.get(pageNum)!.push(text);
+    });
+
+    const lines: string[] = [];
+    const sortedPages = Array.from(pages.entries()).sort((a, b) => a[0] - b[0]);
+    for (const [num, texts] of sortedPages) {
+      if (num > 0) lines.push(`\n--- Page ${num} ---`);
+      lines.push(texts.join(' '));
+    }
+
+    const result = lines.join('\n').slice(0, 15000);
+    if (result.length > 0) return 'PDF_TEXT\n' + result;
   }
 
-  const pages = new Map<number, string[]>();
-  textLayers.forEach(span => {
-    const page = span.closest('[data-page-number], [data-page-no], .page');
-    const pageNum = parseInt(page?.getAttribute('data-page-number') || page?.getAttribute('data-page-no') || '0') || 0;
-    if (!pages.has(pageNum)) pages.set(pageNum, []);
-    const text = span.textContent || '';
-    if (text.trim()) pages.get(pageNum)!.push(text);
-  });
-
-  const lines: string[] = [];
-  const sortedPages = Array.from(pages.entries()).sort((a, b) => a[0] - b[0]);
-  for (const [num, texts] of sortedPages) {
-    if (num > 0) lines.push(`\n--- Page ${num} ---`);
-    lines.push(texts.join(' '));
+  // Strategy 2: Office Online / Word Online / PowerPoint Online viewer
+  const officeViewerSelectors = [
+    '.WACViewPanel',                          // Word Online main view
+    '[class*="TextRun"]',                     // Word Online text runs
+    '.OutlineContent',                        // PowerPoint Online
+    '.slide-content',                         // PowerPoint slides
+    '.ExcelWorksheet',                        // Excel Online
+    '[data-automation-id="TextParagraph"]',   // Word Online paragraphs
+  ];
+  for (const sel of officeViewerSelectors) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) {
+      const text = Array.from(els).map(el => (el as HTMLElement).innerText?.trim()).filter(Boolean).join('\n');
+      if (text.length > 50) return 'DOCUMENT_TEXT\n' + text.slice(0, 15000);
+    }
   }
 
-  const result = lines.join('\n').slice(0, 15000);
-  return result.length > 0 ? 'PDF_TEXT\n' + result : 'PDF text layer was empty.';
+  // Strategy 3: Google Drive document viewer (drive.google.com/viewerng, docs.google.com/gview)
+  const gviewPages = document.querySelectorAll('[role="document"], .drive-viewer-paginated-page, .ndfHFb-c4YZDc-Wrber');
+  if (gviewPages.length > 0) {
+    const text = Array.from(gviewPages).map(el => (el as HTMLElement).innerText?.trim()).filter(Boolean).join('\n\n');
+    if (text.length > 50) return 'DOCUMENT_TEXT\n' + text.slice(0, 15000);
+  }
+
+  // Strategy 4: Same-origin iframes that might contain document viewers
+  for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
+    try {
+      const iDoc = (iframe as HTMLIFrameElement).contentDocument;
+      if (!iDoc) continue;
+
+      // Check for pdf.js inside iframe
+      const iframeTextLayers = iDoc.querySelectorAll('.textLayer span, [data-page-no] span');
+      if (iframeTextLayers.length > 0) {
+        const text = Array.from(iframeTextLayers).map(s => s.textContent?.trim()).filter(Boolean).join(' ');
+        if (text.length > 50) return 'PDF_TEXT (iframe)\n' + text.slice(0, 15000);
+      }
+
+      // Check for generic document content in iframe
+      const iframeText = iDoc.body?.innerText?.trim();
+      if (iframeText && iframeText.length > 100) {
+        return 'DOCUMENT_TEXT (iframe)\n' + iframeText.slice(0, 15000);
+      }
+    } catch { /* cross-origin iframe, skip */ }
+  }
+
+  // Strategy 5: Last resort — if URL suggests a document, try full page content extraction
+  const docUrl = location.href.toLowerCase();
+  const isDocumentUrl = /\.(pdf|docx?|pptx?|xlsx?|odt|rtf)(\?|#|$)/i.test(docUrl) ||
+    docUrl.includes('/viewer') || docUrl.includes('/preview') || docUrl.includes('pluginfile.php');
+  if (isDocumentUrl) {
+    const bodyText = (document.body.innerText ?? '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    if (bodyText.length > 100) {
+      return 'DOCUMENT_TEXT (fallback)\n' + bodyText.slice(0, 15000);
+    }
+  }
+
+  return 'No PDF or document text layer found. The page may use a cross-origin document viewer, or the document is image-based (scanned). Try get_page_content instead.';
 }
 
 // ── Enrichment helpers (called by toolGetPageContent) ─────────────────────────
@@ -556,4 +614,199 @@ export function extractCleanText(root: Element, maxLen = 2000): string {
   }
 
   return parts.join(' ').slice(0, maxLen);
+}
+
+// ── DOM Element Locator ───────────────────────────────────────────────────────
+// Scrapes all clickable/interactive elements and groups them by their nearest
+// section heading. Returns a compressed JSON map the LLM can fuzzy-match against.
+
+interface LocatedElement {
+  /** Stable identifier — data-lanthra-loc-id attribute set on the DOM node. */
+  id: string;
+  /** Visible label text (link text, button text, aria-label). */
+  label: string;
+  /** Tag name (a, button, input, etc.). */
+  tag: string;
+  /** href for links, empty for other elements. */
+  href: string;
+  /** File type hint derived from URL extension (pdf, docx, pptx, etc.) or empty. */
+  fileType: string;
+}
+
+interface PageSection {
+  heading: string;
+  depth: number;
+  elements: LocatedElement[];
+}
+
+/**
+ * Build a structured map of all interactive elements on the page,
+ * grouped by their nearest ancestor heading. Designed for LMS pages
+ * (Moodle, Canvas, Blackboard) with deeply nested accordions.
+ */
+function toolLocatePageElement(maxElements = 300): string {
+  const sections: PageSection[] = [];
+  let currentSection: PageSection = { heading: '(Top of page)', depth: 0, elements: [] };
+  sections.push(currentSection);
+
+  // Counter for generating stable IDs
+  let idCounter = 0;
+
+  // Strategy: Walk the DOM in document order. When we hit a heading, start
+  // a new section. When we hit a clickable element, record it under the
+  // current section.
+  const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+  const HEADING_DEPTH: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+
+  // Selectors for clickable/interactive elements.
+  // Also include common LMS patterns: .activity, .activityinstance, etc.
+  const INTERACTIVE_SELECTOR = [
+    'a[href]',
+    'button',
+    'input[type="submit"]',
+    'input[type="button"]',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    'summary',  // <details><summary> accordions
+  ].join(',');
+
+  // Pre-collect all headings and interactive elements in document order
+  // using a TreeWalker for efficiency.
+  const allNodes: { node: Element; isHeading: boolean }[] = [];
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode(node: Element): number {
+        const tag = node.tagName;
+        // Skip hidden elements
+        if ((node as HTMLElement).offsetParent === null && tag !== 'SUMMARY' && tag !== 'BODY') {
+          // offsetParent is null for hidden elements, but also for fixed/sticky.
+          // Quick check: if display is none, reject.
+          const style = getComputedStyle(node);
+          if (style.display === 'none') return NodeFilter.FILTER_REJECT;
+        }
+        // Skip Lanthra's own UI
+        if (
+          node.hasAttribute('data-lanthra-anchor') ||
+          node.hasAttribute('data-lanthra-host') ||
+          node.hasAttribute('data-lanthra-hover')
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (HEADING_TAGS.has(tag) || node.matches(INTERACTIVE_SELECTOR)) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_SKIP;
+      },
+    },
+  );
+
+  let el: Element | null;
+  while ((el = walker.nextNode() as Element | null)) {
+    allNodes.push({ node: el, isHeading: HEADING_TAGS.has(el.tagName) });
+  }
+
+  // Also capture elements inside Moodle-specific section labels that
+  // act as headings but use spans/divs with specific classes.
+  const moodleSectionHeadings = document.querySelectorAll(
+    '.sectionname, .section-title, .course-section-header, ' +
+    '[data-region="section-header"], .topic-name, .week-name'
+  );
+  const moodleHeadingSet = new Set<Element>(Array.from(moodleSectionHeadings));
+
+  const seen = new Set<Element>();
+  let elementCount = 0;
+
+  for (const { node, isHeading } of allNodes) {
+    if (elementCount >= maxElements) break;
+
+    if (isHeading) {
+      const text = (node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+      if (text) {
+        currentSection = {
+          heading: text,
+          depth: HEADING_DEPTH[node.tagName] ?? 3,
+          elements: [],
+        };
+        sections.push(currentSection);
+      }
+      continue;
+    }
+
+    // Check if this element sits under a Moodle section heading we haven't
+    // turned into a section yet.
+    for (const mh of moodleHeadingSet) {
+      if (node.compareDocumentPosition(mh) & Node.DOCUMENT_POSITION_PRECEDING) {
+        // mh comes before node — check if it's the closest section header
+        const mhText = (mh.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+        if (mhText && currentSection.heading !== mhText) {
+          currentSection = { heading: mhText, depth: 3, elements: [] };
+          sections.push(currentSection);
+          moodleHeadingSet.delete(mh);
+        }
+        break;
+      }
+    }
+
+    if (seen.has(node)) continue;
+    seen.add(node);
+
+    // Extract label
+    let label = (node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 150);
+    if (!label) {
+      label = node.getAttribute('aria-label') ?? node.getAttribute('title') ?? '';
+    }
+    if (!label) continue;
+
+    // Generate and assign a stable ID
+    const locId = `loc-${++idCounter}`;
+    node.setAttribute('data-lanthra-loc-id', locId);
+
+    const href  = (node as HTMLAnchorElement).href ?? '';
+    const tag   = node.tagName.toLowerCase();
+
+    // Derive file type from URL extension  
+    let fileType = '';
+    if (href) {
+      try {
+        const pathname = new URL(href).pathname;
+        const ext = pathname.split('.').pop()?.toLowerCase() ?? '';
+        if (['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'zip', 'csv', 'txt', 'rtf', 'odt'].includes(ext)) {
+          fileType = ext;
+        }
+      } catch { /* invalid URL */ }
+    }
+
+    currentSection.elements.push({ id: locId, label, tag, href, fileType });
+    elementCount++;
+  }
+
+  // Filter out empty sections
+  const nonEmpty = sections.filter(s => s.elements.length > 0);
+
+  if (nonEmpty.length === 0) {
+    return 'PAGE_ELEMENT_MAP\nNo interactive elements found on this page.';
+  }
+
+  // Build compressed JSON output
+  const output = nonEmpty.map(s => ({
+    section: s.heading,
+    depth: s.depth,
+    items: s.elements.map(e => {
+      const entry: Record<string, string> = { id: e.id, label: e.label, tag: e.tag };
+      if (e.href) entry.href = e.href;
+      if (e.fileType) entry.type = e.fileType;
+      return entry;
+    }),
+  }));
+
+  const json = JSON.stringify(output);
+  // Safety cap — if the map is huge, truncate gracefully
+  if (json.length > 20_000) {
+    return 'PAGE_ELEMENT_MAP\n' + json.slice(0, 20_000) + '\n...(truncated)';
+  }
+  return 'PAGE_ELEMENT_MAP\n' + json;
 }

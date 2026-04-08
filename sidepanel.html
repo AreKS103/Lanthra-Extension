@@ -74,6 +74,23 @@
 
     <!-- Bottom input area -->
     <div class="input-area">
+      <!-- Highlight context indicator (shown when text is selected on the page) -->
+      <div id="highlight-context" class="highlight-context hidden">
+        <div id="highlight-context-header" class="highlight-context-header">
+          <svg class="highlight-context-icon" width="12" height="12" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          <span class="highlight-context-label">Highlighted text</span>
+          <span id="highlight-context-clear" class="highlight-context-clear" title="Dismiss">&times;</span>
+          <svg id="highlight-chevron" class="highlight-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+        <div id="highlight-context-body" class="highlight-context-body"></div>
+      </div>
       <div class="input-row">
         <textarea id="chat-input" placeholder="Ask Lanthra anything…" rows="1" disabled></textarea>
         <button id="btn-send" class="icon-btn send-btn" disabled title="Send (Enter)">

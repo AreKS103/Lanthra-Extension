@@ -72,6 +72,16 @@ chrome.runtime.onMessage.addListener(
         try { panelPromptPort.disconnect(); } catch { /* already closed */ }
       }
 
+      // Build context — use highlighted text constraint if provided by sidepanel
+      const highlightedText = m['highlightedText'] as string | undefined;
+      const history = m['history'] as Array<{ role: 'user' | 'assistant'; content: string }> | undefined;
+      let context: string;
+      if (highlightedText) {
+        context = `lanthra:selection\nTitle: ${document.title ?? ''}\nURL: ${location.href}\nSelected Text: ${highlightedText.slice(0, 30000)}`;
+      } else {
+        context = extractPageContent();
+      }
+
       // Open a temporary port to the service worker for this panel-initiated chat
       const chatId = crypto.randomUUID();
       const port = chrome.runtime.connect({ name: `lanthra:session:${chatId}` });
@@ -81,7 +91,8 @@ chrome.runtime.onMessage.addListener(
         type: 'LANTHRA_PROMPT_SUBMIT',
         sessionId: chatId,
         prompt,
-        context: extractPageContent(),
+        context,
+        history,
       });
 
       // Listen for tokens/control messages from the service worker.
@@ -234,3 +245,29 @@ function needsPostContext(prompt: string): boolean {
   ];
   return postTerms.some(term => lower.includes(term));
 }
+
+// ── Selection change broadcasting (for sidepanel highlight context) ──────────
+
+let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
+let lastBroadcastedSelection = '';
+
+document.addEventListener('selectionchange', () => {
+  if (selectionDebounce) clearTimeout(selectionDebounce);
+  selectionDebounce = setTimeout(() => {
+    const text = window.getSelection()?.toString().trim() ?? '';
+    if (text === lastBroadcastedSelection) return;
+    lastBroadcastedSelection = text;
+    chrome.runtime.sendMessage({
+      type: 'LANTHRA_SELECTION_CHANGED',
+      text,
+    }).catch(() => { /* sidepanel may not be open */ });
+  }, 200);
+});
+
+// Respond to on-demand selection queries from the sidepanel
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === 'LANTHRA_GET_SELECTION') {
+    const text = window.getSelection()?.toString().trim() ?? '';
+    sendResponse({ text });
+  }
+});
